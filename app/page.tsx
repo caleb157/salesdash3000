@@ -9,7 +9,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Rec
   const sp = await searchParams;
   const cfg = getConfig();
   const today = todayIn(cfg.timeZone);
-  const basis: Basis = sp.basis === "fiscal" ? "fiscal" : "calendar";
+  const basis: Basis = sp.basis === "calendar" || sp.basis === "fiscal" ? sp.basis : cfg.fyStartMonth === 1 ? "calendar" : "fiscal";
   const thisYear = currentYear(basis, today, cfg.fyStartMonth);
   const year = Number(sp.year) || thisYear;
   const { start, end } = yearRange(basis, year, cfg.fyStartMonth);
@@ -37,7 +37,6 @@ export default async function Page({ searchParams }: { searchParams: Promise<Rec
   return (
     <Dashboard
       data={data}
-      goals={cfg.goals}
       basis={basis}
       year={year}
       thisYear={thisYear}

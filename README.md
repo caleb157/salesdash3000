@@ -7,13 +7,17 @@ with month / quarter / year snapshots (calendar or financial year) and progress 
 
 | Figure | Source in Odoo |
 |---|---|
-| **Booked** | Confirmed sales orders (`sale.order`, state Sales Order), dated by confirmation date |
-| **Invoiced** | Posted customer invoices (`account.move`), dated by invoice date, net of credit notes |
+| **Booked** | Confirmed sales orders, dated by confirmation date |
+| **Fully invoiced** | Sales orders whose invoice status is *Fully Invoiced*, dated by their last posted invoice |
 | **Ready to invoice** | Orders booked in the period whose invoice status is *To Invoice* |
 | **Open orders** | Every confirmed order not yet fully invoiced, any date |
 
-Amounts are untaxed and in the company currency by default (foreign-currency orders are converted at the order's rate).
-Goals are annual; quarter and month views show the goal ÷ 4 and ÷ 12.
+Everything is shown **before tax, in INR**. Orders in other currencies (e.g. USD) and the USD goals are
+converted at **live rates** (frankfurter.dev / ECB, with open.er-api.com as backup, refreshed hourly).
+The rate used is shown at the bottom of the page.
+
+Goals are annual (Goal 1 ₹1 crore, Goal 2 $175k, Goal 3 $240k). Quarter and month views show goal ÷ 4 and ÷ 12.
+The financial year runs April → March.
 
 ## Deploy to Vercel
 
@@ -28,11 +32,9 @@ Goals are annual; quarter and month views show the goal ÷ 4 and ÷ 12.
    | `ODOO_API_KEY` | your Odoo API key (Odoo → My Profile → Account Security → New API Key) |
    | `DASHBOARD_PASSWORD` | the password you'll type to open the dashboard |
    | `AUTH_SECRET` | any long random string, e.g. output of `openssl rand -hex 32` |
-   | `GOALS` | `140000,175000,240000` |
-   | `FY_START_MONTH` | `1` = January, `4` = April, `7` = July … |
-   | `TIMEZONE` | e.g. `America/Los_Angeles` |
 
-   Optional: `AMOUNT_BASIS=total` to include tax, `INCLUDE_CREDIT_NOTES=false`, `DEMO_MODE=true` for fake data.
+   Optional (defaults shown): `GOALS=10000000 INR,175000 USD,240000 USD`, `FY_START_MONTH=4`,
+   `TIMEZONE=Asia/Kolkata`, `USD_INR_RATE=88` (only used if live rates are unreachable), `DEMO_MODE=true` for fake data.
 3. Deploy. Open the URL, enter the password.
 
 Without `ODOO_API_KEY` the app runs on demo data (a yellow **Demo data** badge shows in the header).

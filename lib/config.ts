@@ -1,19 +1,21 @@
-export type AmountBasis = "untaxed" | "total";
+export interface GoalSpec {
+  amount: number;
+  currency: string;
+}
 
-function num(v: string | undefined, fallback: number) {
-  const n = Number(v);
-  return Number.isFinite(n) && v !== undefined && v !== "" ? n : fallback;
+/** "10000000 INR, 175000 USD" -> [{amount, currency}] (currency defaults to INR). */
+function parseGoals(raw: string): GoalSpec[] {
+  return raw
+    .split(",")
+    .map((g) => {
+      const m = g.trim().match(/^([\d.]+)\s*([A-Za-z]{3})?$/);
+      return m ? { amount: Number(m[1]), currency: (m[2] ?? "INR").toUpperCase() } : null;
+    })
+    .filter((g): g is GoalSpec => !!g && g.amount > 0);
 }
 
 export function getConfig() {
-  const goals = (process.env.GOALS ?? "140000,175000,240000")
-    .split(",")
-    .map((g) => Number(g.trim()))
-    .filter((g) => Number.isFinite(g) && g > 0)
-    .sort((a, b) => a - b);
-
-  const fyStart = Math.min(12, Math.max(1, Math.round(num(process.env.FY_START_MONTH, 1))));
-
+  const fy = Number(process.env.FY_START_MONTH);
   return {
     odoo: {
       url: (process.env.ODOO_URL ?? "").replace(/\/+$/, ""),
@@ -22,11 +24,9 @@ export function getConfig() {
       apiKey: process.env.ODOO_API_KEY ?? "",
     },
     demo: process.env.DEMO_MODE === "true" || !process.env.ODOO_API_KEY,
-    goals,
-    fyStartMonth: fyStart,
-    timeZone: process.env.TIMEZONE || "UTC",
-    amountBasis: (process.env.AMOUNT_BASIS === "total" ? "total" : "untaxed") as AmountBasis,
-    includeCreditNotes: process.env.INCLUDE_CREDIT_NOTES !== "false",
+    goals: parseGoals(process.env.GOALS ?? "10000000 INR,175000 USD,240000 USD"),
+    fyStartMonth: Number.isInteger(fy) && fy >= 1 && fy <= 12 ? fy : 4,
+    timeZone: process.env.TIMEZONE || "Asia/Kolkata",
   };
 }
 

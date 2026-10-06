@@ -7,30 +7,36 @@ export interface Order {
   customer: string;
   salesperson: string;
   date: string; // YYYY-MM-DD (local), confirmation date
-  amount: number; // company currency
-  currency: string; // original order currency
+  amount: number; // untaxed, converted to INR
+  originalAmount: number; // untaxed, order currency
+  currency: string; // order currency
   invoiceStatus: InvoiceStatus;
+  invoicedDate?: string; // fully invoiced orders: date of the last posted invoice
+  invoiceRefs?: string[];
 }
 
-export interface Invoice {
-  id: number;
-  ref: string; // INV/2026/00012
-  origin: string; // source SO(s)
-  customer: string;
-  date: string; // invoice date YYYY-MM-DD
-  amount: number; // company currency, negative for credit notes
-  isCreditNote: boolean;
-  paymentState: string;
+export interface Goal {
+  amount: number; // INR
+  originalAmount: number;
+  currency: string;
+}
+
+export interface FxInfo {
+  inrPer: Record<string, number>; // INR for 1 unit of currency
+  date: string;
+  source: string;
+  live: boolean;
 }
 
 export interface DashboardData {
   generatedAt: string;
   demo: boolean;
-  currency: string;
   company: string;
   yearStart: string; // inclusive YYYY-MM-DD
   yearEnd: string; // exclusive YYYY-MM-DD
-  orders: Order[]; // booked within the year
-  invoices: Invoice[]; // posted within the year
-  openOrders: Order[]; // all confirmed orders not fully invoiced (any date)
+  orders: Order[]; // booked (confirmed) within the year
+  invoicedOrders: Order[]; // fully invoiced, last invoice dated within the year
+  openOrders: Order[]; // confirmed, not fully invoiced (any date)
+  goals: Goal[];
+  fx: FxInfo;
 }
