@@ -3,9 +3,9 @@ import { unstable_cache } from "next/cache";
 import { getConfig, type Config } from "./config";
 import { getFx } from "./fx";
 import { Odoo } from "./odoo";
-import { utcToLocalDate } from "./periods";
-import type { DashboardData, FxInfo, Goal, InvoiceStatus, Order } from "./types";
-import { demoData } from "./demo";
+import { currentYear, todayIn, utcToLocalDate, yearLabel, yearRange } from "./periods";
+import type { DashboardData, FxInfo, Goal, InvoiceStatus, Order, RevenueData, RevenueItem, RevenueYear } from "./types";
+import { demoData, demoRevenue } from "./demo";
 
 type M2O = [number, string] | false;
 const m2o = (v: M2O) => (v ? v[1] : "");
@@ -93,18 +93,104 @@ async function loadFromOdoo(cfg: Config, yearStart: string, yearEnd: string) {
   const rawOpen = await odoo.searchRead<RawOrder>("sale.order",
     [confirmed, ["invoice_status", "!=", "invoiced"]],
     fields, "date_order desc");
+
+  // Uninvoiced remainder per open order = untaxed total − what's been invoiced (net of credit notes).
+  // Summed per order, so down-payment invoices are netted off correctly.
+  const lines = rawOpen.length
+    ? await odoo.searchRead<{ order_id: M2O; untaxed_amount_invoiced: number }>("sale.order.line",
+        [["order_id", "in", rawOpen.map((o) => o.id)]], ["order_id", "untaxed_amount_invoiced"])
+    : [];
+  const invoicedSoFar = new Map<number, number>();
+  for (const l of lines) if (l.order_id) invoicedSoFar.set(l.order_id[0], (invoicedSoFar.get(l.order_id[0]) ?? 0) + l.untaxed_amount_invoiced);
+
   return {
     company: company.name,
+    companyCurrency,
     booked: rawBooked.map(toOrder).filter((o) => o.date >= yearStart && o.date < yearEnd),
-    open: rawOpen.map(toOrder),
+    open: rawOpen.map((o) => ({ ...toOrder(o), remainingOriginal: Math.max(0, o.amount_untaxed - (invoicedSoFar.get(o.id) ?? 0)) })),
   };
+}
+
+/** Invoices (net of credit notes) and other bank income, untaxed, in company currency. */
+async function loadRevenue(cfg: Config, start: string, end: string): Promise<RevenueItem[]> {
+  const odoo = new Odoo(cfg.odoo);
+  await odoo.authenticate();
+
+  const invoices = await odoo.searchRead<{
+    id: number; name: string; invoice_origin: string | false; partner_id: M2O; invoice_date: string; amount_untaxed_signed: number;
+  }>("account.move",
+    [["move_type", "in", ["out_invoice", "out_refund"]], ["state", "=", "posted"], ["invoice_date", ">=", start], ["invoice_date", "<", end]],
+    ["name", "invoice_origin", "partner_id", "invoice_date", "amount_untaxed_signed"], "invoice_date desc");
+
+  // Income booked straight from bank/cash (drawbacks, incentives, interest…): journal items on income
+  // accounts in bank/cash journals that aren't part of an invoice.
+  const other = await odoo.searchRead<{
+    id: number; date: string; name: string | false; move_id: M2O; partner_id: M2O; account_id: M2O; balance: number;
+  }>("account.move.line",
+    [
+      ["parent_state", "=", "posted"],
+      ["move_id.move_type", "=", "entry"],
+      ["journal_id.type", "in", ["bank", "cash"]],
+      ["account_id.internal_group", "=", "income"],
+      ["date", ">=", start], ["date", "<", end],
+    ],
+    ["date", "name", "move_id", "partner_id", "account_id", "balance"], "date desc");
+
+  return [
+    ...invoices.map((i): RevenueItem => ({
+      id: `inv-${i.id}`, kind: "invoice", ref: i.name, label: i.invoice_origin || "", partner: m2o(i.partner_id),
+      date: i.invoice_date, amount: i.amount_untaxed_signed,
+    })),
+    ...other.map((l): RevenueItem => ({
+      id: `aml-${l.id}`, kind: "other", ref: m2o(l.move_id), label: l.name || m2o(l.account_id), partner: m2o(l.partner_id),
+      date: l.date, amount: -l.balance, // income is a credit
+    })),
+  ];
+}
+
+/** The current calendar year and current financial year (revenue projection is always "this year"). */
+export function revenueYears(cfg: Config): { calendar: RevenueYear; fiscal: RevenueYear } {
+  const today = todayIn(cfg.timeZone);
+  const cy = currentYear("calendar", today, cfg.fyStartMonth);
+  const fy = currentYear("fiscal", today, cfg.fyStartMonth);
+  return {
+    calendar: { label: yearLabel("calendar", cy, cfg.fyStartMonth), ...yearRange("calendar", cy, cfg.fyStartMonth) },
+    fiscal: { label: yearLabel("fiscal", fy, cfg.fyStartMonth), ...yearRange("fiscal", fy, cfg.fyStartMonth) },
+  };
+}
+
+const cachedRevenue = unstable_cache(
+  async (start: string, end: string) => loadRevenue(getConfig(), start, end),
+  ["odoo-revenue-v1"],
+  { revalidate: 600, tags: ["odoo"] },
+);
+const lastGoodRevenue = new Map<string, RevenueItem[]>();
+
+async function getRevenue(cfg: Config, fx: FxInfo, companyCurrency: string): Promise<RevenueData> {
+  const years = revenueYears(cfg);
+  const start = [years.calendar.start, years.fiscal.start].sort()[0];
+  const end = [years.calendar.end, years.fiscal.end].sort()[1];
+  const key = `${start}|${end}`;
+  try {
+    const items = await cachedRevenue(start, end);
+    lastGoodRevenue.set(key, items);
+    return { ...years, items: companyToInr(items, companyCurrency, fx) };
+  } catch (e) {
+    const prev = lastGoodRevenue.get(key);
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ...years, items: prev ? companyToInr(prev, companyCurrency, fx) : [], error: prev ? `Showing earlier data (${msg})` : msg };
+  }
+}
+
+function companyToInr(items: RevenueItem[], companyCurrency: string, fx: FxInfo) {
+  return companyCurrency === "INR" ? items : items.map((i) => ({ ...i, amount: toInr(i.amount, companyCurrency, fx) }));
 }
 
 const lastGood = new Map<string, { raw: Awaited<ReturnType<typeof loadFromOdoo>>; at: string }>();
 
 const cachedOdoo = unstable_cache(
   async (yearStart: string, yearEnd: string) => loadFromOdoo(getConfig(), yearStart, yearEnd),
-  ["odoo-dashboard-v4"],
+  ["odoo-dashboard-v5"],
   { revalidate: 600, tags: ["odoo"] },
 );
 
@@ -112,7 +198,10 @@ export async function getDashboardData(yearStart: string, yearEnd: string): Prom
   const cfg = getConfig();
   const fx = await getFx();
   const goals = convertGoals(cfg, fx);
-  if (cfg.demo) return demoData(yearStart, yearEnd, fx, goals);
+  if (cfg.demo) {
+    const data = demoData(yearStart, yearEnd, fx, goals);
+    return { ...data, revenue: demoRevenue(revenueYears(cfg)) };
+  }
 
   let raw: Awaited<ReturnType<typeof loadFromOdoo>>;
   let stale: string | undefined;
@@ -128,10 +217,15 @@ export async function getDashboardData(yearStart: string, yearEnd: string): Prom
     stale = `Odoo didn't respond (${e instanceof Error ? e.message : e}); showing data from ${prev.at.slice(0, 16).replace("T", " ")} UTC.`;
   }
   // Already INR for an INR company; only a non-INR company currency (or a missing Odoo rate) needs the live rate.
-  const conv = ({ base, ...o }: Omit<Order, "amount"> & { base: { value: number; currency: string } }): Order => ({
-    ...o,
-    amount: base.currency === "INR" ? base.value : toInr(base.value, base.currency, fx),
-  });
+  type RawConv = Omit<Order, "amount" | "remaining"> & { base: { value: number; currency: string }; remainingOriginal?: number };
+  const conv = ({ base, remainingOriginal, ...o }: RawConv): Order => {
+    const amount = base.currency === "INR" ? base.value : toInr(base.value, base.currency, fx);
+    // The remainder converts at the same (order-date) rate as the order itself.
+    const remaining = remainingOriginal === undefined ? undefined
+      : o.originalAmount ? (amount * remainingOriginal) / o.originalAmount : 0;
+    return { ...o, amount, ...(remaining === undefined ? {} : { remaining }) };
+  };
+  const revenue = await getRevenue(cfg, fx, raw.companyCurrency);
   return {
     generatedAt: new Date().toISOString(),
     demo: false,
@@ -141,6 +235,7 @@ export async function getDashboardData(yearStart: string, yearEnd: string): Prom
     yearEnd,
     orders: raw.booked.map(conv),
     openOrders: raw.open.map(conv),
+    revenue,
     goals,
     fx,
   };

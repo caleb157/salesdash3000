@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { inRange, monthsOf, quartersOf, yearLabel as fmtYearLabel, type Basis, type Slice } from "@/lib/periods";
-import type { DashboardData, Order } from "@/lib/types";
+import type { DashboardData, Order, RevenueData } from "@/lib/types";
 
 type View = "year" | "quarter" | "month";
 type Tab = "booked" | "invoiced" | "toinvoice" | "open";
@@ -105,6 +105,8 @@ export default function Dashboard(props: Props) {
       </header>
 
       {data.stale && <p className="stale small">{data.stale}</p>}
+
+      <RevenueCard revenue={data.revenue} openOrders={data.openOrders} goals={goals} money={money} defaultBasis={basis} />
 
       <nav className="controls" aria-label="Period">
         <div className="seg" role="group" aria-label="Year type">
@@ -279,10 +281,12 @@ function GoalTrack({ goals, rows, money, notes }: { goals: number[]; rows: { key
               ))}
             </div>
             <div className="goal-status small">
-              {hit > 0 && <span className="ok">✓ Goal {hit} reached</span>}
-              {next !== undefined
-                ? <span className="muted">{money.full(next - r.value)} to Goal {hit + 1} ({Math.round((r.value / next) * 100)}%)</span>
-                : <span className="ok">All goals reached 🎉</span>}
+              {next === undefined
+                ? <span className="ok">✓ All {goals.length} goals reached 🎉</span>
+                : <>
+                    {hit > 0 && <span className="ok">✓ Goal {hit} reached</span>}
+                    <span className="muted">{money.full(next - r.value)} to Goal {hit + 1} ({Math.round((r.value / next) * 100)}%)</span>
+                  </>}
             </div>
           </div>
         );
@@ -373,6 +377,120 @@ function niceTicks(max: number) {
 
 function odooLink(odooUrl: string, model: string, id: number) {
   return odooUrl ? `${odooUrl}/web#id=${id}&model=${model}&view_type=form` : undefined;
+}
+
+function RevenueCard({ revenue, openOrders, goals, money, defaultBasis }: {
+  revenue: RevenueData; openOrders: Order[]; goals: number[]; money: Money; defaultBasis: Basis;
+}) {
+  const [basis, setBasis] = useState<Basis>(defaultBasis);
+  const [showItems, setShowItems] = useState(false);
+  const yr = basis === "fiscal" ? revenue.fiscal : revenue.calendar;
+
+  const r = useMemo(() => {
+    const items = revenue.items.filter((i) => inRange(i.date, yr.start, yr.end));
+    const pipeline = openOrders.filter((o) => (o.remaining ?? 0) > 0.5);
+    const sum = (xs: number[]) => xs.reduce((s, x) => s + x, 0);
+    const invoiced = sum(items.filter((i) => i.kind === "invoice").map((i) => i.amount));
+    const other = sum(items.filter((i) => i.kind === "other").map((i) => i.amount));
+    const notYet = sum(pipeline.map((o) => o.remaining ?? 0));
+    return { items, pipeline, invoiced, other, inSoFar: invoiced + other, notYet, projected: invoiced + other + notYet };
+  }, [revenue.items, openOrders, yr.start, yr.end]);
+
+  const max = Math.max(goals[goals.length - 1] * 1.08, r.projected * 1.02, 1);
+  const pctOf = (v: number) => `${Math.max(0, Math.min(100, (v / max) * 100))}%`;
+  const hit = goals.filter((g) => r.projected >= g).length;
+  const next = goals[hit];
+
+  return (
+    <section className="card revenue">
+      <div className="card-head">
+        <div>
+          <h3>Revenue projection</h3>
+          <p className="muted small rev-sub">Invoiced + other bank income + what&apos;s still to invoice on open orders. Before tax.</p>
+        </div>
+        <div className="seg" role="group" aria-label="Revenue year">
+          <button className={basis === "calendar" ? "on" : ""} onClick={() => setBasis("calendar")}>{revenue.calendar.label}</button>
+          <button className={basis === "fiscal" ? "on" : ""} onClick={() => setBasis("fiscal")}>{revenue.fiscal.label}</button>
+        </div>
+      </div>
+      {revenue.error && <p className="stale small">Couldn&apos;t load invoices / bank income: {revenue.error}</p>}
+
+      <div className="rev-grid">
+        <div>
+          <div className="tile-label"><i className="sw rev-in" />Already in</div>
+          <div className="tile-value">{money.full(r.inSoFar)}</div>
+          <div className="muted small">{money.full(r.invoiced)} invoiced · {money.full(r.other)} other bank income</div>
+        </div>
+        <div>
+          <div className="tile-label"><i className="sw rev-next" />Not in yet</div>
+          <div className="tile-value">{money.full(r.notYet)}</div>
+          <div className="muted small">Uninvoiced on {plural(r.pipeline.length, "open order")}</div>
+        </div>
+        <div className="rev-total">
+          <div className="tile-label">Projected for {yr.label}</div>
+          <div className="tile-value">{money.full(r.projected)}</div>
+          <div className="small">
+            {next === undefined
+              ? <span className="ok">✓ All {goals.length} goals covered 🎉</span>
+              : <>
+                  {hit > 0 && <span className="ok">✓ Goal {hit} covered · </span>}
+                  <span className="muted">{money.full(next - r.projected)} short of Goal {hit + 1}</span>
+                </>}
+          </div>
+        </div>
+      </div>
+
+      <div className="bar-wrap rev-bar" aria-hidden>
+        <div className="bar-bg">
+          <div className="rev-seg rev-next-fill" style={{ width: pctOf(r.projected) }} />
+          <div className="rev-seg rev-in-fill" style={{ width: pctOf(r.inSoFar) }} />
+        </div>
+        {goals.map((g, i) => <div key={i} className={`tick ${r.projected >= g ? "hit" : ""}`} style={{ left: pctOf(g) }} title={`Goal ${i + 1}: ${money.full(g)}`} />)}
+      </div>
+      <div className="goal-scale">
+        {goals.map((g, i) => <span key={i} style={{ left: pctOf(g) }}>G{i + 1}</span>)}
+      </div>
+
+      <button className="linkish small" onClick={() => setShowItems((v) => !v)}>
+        {showItems ? "Hide" : "Show"} what&apos;s included ({r.items.length + r.pipeline.length})
+      </button>
+      {showItems && <RevenueTable items={r.items} pipeline={r.pipeline} money={money} />}
+    </section>
+  );
+}
+
+function RevenueTable({ items, pipeline, money }: { items: RevenueData["items"]; pipeline: Order[]; money: Money }) {
+  const rows = [
+    ...items.map((i) => ({
+      key: i.id, date: i.date, ref: i.ref, partner: i.partner, detail: i.label, amount: i.amount,
+      type: i.kind === "other" ? "Bank income" : i.amount < 0 ? "Credit note" : "Invoice",
+    })),
+    ...pipeline.map((o) => ({
+      key: `so-${o.id}`, date: o.date, ref: o.ref, partner: o.customer, amount: o.remaining ?? 0, type: "Not invoiced yet",
+      detail: o.remaining !== undefined && o.remaining < o.amount - 0.5 ? `${money.full(o.remaining)} of ${money.full(o.amount)} left` : "Whole order",
+    })),
+  ].sort((a, b) => b.date.localeCompare(a.date));
+  const total = rows.reduce((s, r) => s + r.amount, 0);
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead><tr><th className="hide-sm">Date</th><th>Type</th><th>Ref</th><th className="hide-sm">Customer / payer</th><th className="hide-sm">Detail</th><th className="num">Amount</th></tr></thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.key}>
+              <td className="nowrap hide-sm">{r.date}</td>
+              <td><span className={`status ${r.type === "Not invoiced yet" ? "s-to-invoice" : r.type === "Bank income" ? "s-bank" : "s-invoiced"}`}>{r.type}</span></td>
+              <td><span className="ref">{r.ref}</span></td>
+              <td className="hide-sm">{r.partner || "—"}</td>
+              <td className="hide-sm muted">{r.detail || "—"}</td>
+              <td className="num">{money.full(r.amount)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot><tr><td colSpan={5} className="hide-sm">Projected total</td><td colSpan={2} className="show-sm">Projected total</td><td className="num">{money.full(total)}</td></tr></tfoot>
+      </table>
+    </div>
+  );
 }
 
 function OrderTable({ rows, money, odooUrl }: { rows: Order[]; money: Money; odooUrl: string }) {

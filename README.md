@@ -14,6 +14,21 @@ with month / quarter / year snapshots (calendar or financial year) and progress 
 
 Fully invoiced + To invoice always equals Booked for the selected period.
 
+### Revenue projection
+
+A top-line number for the **current** calendar year and financial year (toggle between them):
+
+| Part | Source in Odoo |
+|---|---|
+| **Already in — invoiced** | Posted customer invoices minus credit notes, untaxed, by invoice date |
+| **Already in — other bank income** | Posted bank/cash journal items booked straight to income accounts (drawbacks, export incentives, interest…), by date |
+| **Not in yet** | For every confirmed order not fully invoiced: untaxed total minus what's already been invoiced |
+| **Projected** | Already in + Not in yet |
+
+"Not in yet" covers all open orders whatever their date, on the assumption they'll be invoiced this year.
+Other income only appears if the bank line was matched directly to an income account; income first booked to a
+receivable (or posted in a miscellaneous journal) isn't picked up.
+
 Everything is shown **before tax, in INR**. Orders in other currencies (e.g. USD) are converted at
 **Odoo's own exchange rate on the order date** (the order's `currency_rate`). The USD goals are converted at the
 **live rate** (frankfurter.dev / ECB, with open.er-api.com as backup, refreshed hourly), shown at the bottom of the page.

@@ -1,4 +1,4 @@
-import type { DashboardData, FxInfo, Goal, InvoiceStatus, Order } from "./types";
+import type { DashboardData, FxInfo, Goal, InvoiceStatus, Order, RevenueData, RevenueItem, RevenueYear } from "./types";
 
 // Deterministic pseudo-random generator so demo data is stable between reloads.
 function rng(seed: number) {
@@ -15,7 +15,7 @@ const CUSTOMERS = [
 const REPS = ["Parker", "Sam", "Alex"];
 const DAY = 86400000;
 
-export function demoData(yearStart: string, yearEnd: string, fx: FxInfo, goals: Goal[]): DashboardData {
+export function demoData(yearStart: string, yearEnd: string, fx: FxInfo, goals: Goal[]): Omit<DashboardData, "revenue"> {
   const r = rng(Number(yearStart.replace(/-/g, "")));
   const today = new Date().toISOString().slice(0, 10);
   const all: Order[] = [];
@@ -44,8 +44,34 @@ export function demoData(yearStart: string, yearEnd: string, fx: FxInfo, goals: 
     yearStart,
     yearEnd,
     orders: all.filter((o) => o.date >= yearStart && o.date < yearEnd),
-    openOrders: all.filter((o) => o.invoiceStatus !== "invoiced"),
+    // Some open orders are part-invoiced (e.g. a down payment), so only part of them is still to come.
+    openOrders: all.filter((o) => o.invoiceStatus !== "invoiced").map((o) => ({ ...o, remaining: o.id % 3 ? o.amount : o.amount * 0.6 })),
     goals,
     fx,
   };
+}
+
+export function demoRevenue(years: { calendar: RevenueYear; fiscal: RevenueYear }): RevenueData {
+  const start = [years.calendar.start, years.fiscal.start].sort()[0];
+  const today = new Date().toISOString().slice(0, 10);
+  const r = rng(Number(start.replace(/-/g, "")) + 7);
+  const items: RevenueItem[] = [];
+  let n = 1;
+  for (let t = Date.parse(start); t < Date.parse(today); t += DAY * (3 + Math.floor(r() * 7)), n++) {
+    const date = new Date(t).toISOString().slice(0, 10);
+    const credit = r() < 0.04;
+    items.push({
+      id: `inv-${n}`, kind: "invoice", ref: `${credit ? "RINV" : "INV"}/${date.slice(0, 4)}/${String(n).padStart(5, "0")}`,
+      label: `S${String(900 + n).padStart(5, "0")}`, partner: CUSTOMERS[Math.floor(r() * CUSTOMERS.length)], date,
+      amount: Math.round((credit ? -0.2 : 1) * (150000 + r() * 1200000)),
+    });
+    if (r() < 0.12) {
+      items.push({
+        id: `aml-${n}`, kind: "other", ref: `BNK1/${date.slice(0, 4)}/${String(n).padStart(5, "0")}`,
+        label: r() < 0.5 ? "Duty drawback" : "RoDTEP export incentive", partner: "Customs / DGFT", date,
+        amount: Math.round(20000 + r() * 180000),
+      });
+    }
+  }
+  return { ...years, items: items.reverse() };
 }
