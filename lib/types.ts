@@ -31,6 +31,7 @@ export interface FxInfo {
 export interface DashboardData {
   generatedAt: string;
   demo: boolean;
+  stale?: string; // set when Odoo failed and we're showing the last good load
   company: string;
   yearStart: string; // inclusive YYYY-MM-DD
   yearEnd: string; // exclusive YYYY-MM-DD

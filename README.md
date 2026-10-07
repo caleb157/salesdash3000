@@ -12,9 +12,12 @@ with month / quarter / year snapshots (calendar or financial year) and progress 
 | **Ready to invoice** | Orders booked in the period whose invoice status is *To Invoice* |
 | **Open orders** | Every confirmed order not yet fully invoiced, any date |
 
-Everything is shown **before tax, in INR**. Orders in other currencies (e.g. USD) and the USD goals are
-converted at **live rates** (frankfurter.dev / ECB, with open.er-api.com as backup, refreshed hourly).
-The rate used is shown at the bottom of the page.
+Everything is shown **before tax, in INR**. Orders in other currencies (e.g. USD) are converted at
+**Odoo's own exchange rate on the order date** (the order's `currency_rate`). The USD goals are converted at the
+**live rate** (frankfurter.dev / ECB, with open.er-api.com as backup, refreshed hourly), shown at the bottom of the page.
+
+Odoo Online rate-limits API traffic, so the dashboard makes its few calls one at a time, retries on HTTP 429,
+caches each load for 10 minutes, and falls back to the last good load if Odoo is briefly unavailable.
 
 Goals are annual (Goal 1 ₹1 crore, Goal 2 $175k, Goal 3 $240k). Quarter and month views show goal ÷ 4 and ÷ 12.
 The financial year runs April → March.

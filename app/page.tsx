@@ -28,7 +28,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<Rec
         <div className="card error-card">
           <h1>Couldn&apos;t load data from Odoo</h1>
           <p>{error}</p>
-          <p className="muted">Check ODOO_URL, ODOO_DB, ODOO_LOGIN and ODOO_API_KEY in your Vercel environment variables.</p>
+          <p className="muted">
+            {error?.includes("429")
+              ? "Odoo is temporarily limiting API requests. Wait a minute and reload — once a load succeeds it's cached for 10 minutes."
+              : "Check ODOO_URL, ODOO_DB, ODOO_LOGIN and ODOO_API_KEY in your Vercel environment variables."}
+          </p>
         </div>
       </main>
     );

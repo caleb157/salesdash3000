@@ -103,6 +103,8 @@ export default function Dashboard(props: Props) {
         </div>
       </header>
 
+      {data.stale && <p className="stale small">{data.stale}</p>}
+
       <nav className="controls" aria-label="Period">
         <div className="seg" role="group" aria-label="Year type">
           <a className={basis === "calendar" ? "on" : ""} href={yearHref("calendar", year)}>Calendar</a>
@@ -189,8 +191,9 @@ export default function Dashboard(props: Props) {
       <footer className="muted small foot">
         {fmtYearLabel(basis, year, props.fyStartMonth)} runs {data.yearStart} to {data.yearEnd} (exclusive). Booked = confirmed sales orders by confirmation date.
         Fully invoiced = orders whose invoicing is complete, dated by their last invoice. All amounts before tax, in INR.
-        {" "}{data.fx.live
-          ? <>USD → INR {data.fx.inrPer.USD?.toFixed(2)} (live, {data.fx.date}, {data.fx.source}).</>
+        {" "}Foreign-currency orders use Odoo&apos;s exchange rate on the order date. USD goals use the live rate:{" "}
+        {data.fx.live
+          ? <>USD → INR {data.fx.inrPer.USD?.toFixed(2)} ({data.fx.date}, {data.fx.source}).</>
           : <span className="warn-text">USD → INR {data.fx.inrPer.USD?.toFixed(2)} — {data.fx.source}.</span>}
       </footer>
     </main>

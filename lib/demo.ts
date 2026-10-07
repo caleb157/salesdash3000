@@ -18,7 +18,6 @@ const DAY = 86400000;
 export function demoData(yearStart: string, yearEnd: string, fx: FxInfo, goals: Goal[]): DashboardData {
   const r = rng(Number(yearStart.replace(/-/g, "")));
   const today = new Date().toISOString().slice(0, 10);
-  const usdInr = fx.inrPer.USD ?? 88;
   const all: Order[] = [];
   let n = 1;
   // Start a few months early so fully-invoiced orders can cross the year boundary.
@@ -32,7 +31,7 @@ export function demoData(yearStart: string, yearEnd: string, fx: FxInfo, goals: 
     const order: Order = {
       id: n, ref, customerRef: r() < 0.6 ? `PO-${Math.floor(r() * 90000 + 10000)}` : "",
       customer: CUSTOMERS[Math.floor(r() * CUSTOMERS.length)], salesperson: REPS[Math.floor(r() * REPS.length)],
-      date, originalAmount: original, currency: usd ? "USD" : "INR", amount: usd ? original * usdInr : original,
+      date, originalAmount: original, currency: usd ? "USD" : "INR", amount: usd ? Math.round(original * (84 + 4 * r())) : original, // stand-in for Odoo's order-date rate
       invoiceStatus: status,
     };
     if (status === "invoiced") {
