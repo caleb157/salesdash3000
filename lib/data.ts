@@ -21,7 +21,6 @@ interface RawOrder {
   currency_id: M2O;
   invoice_status: InvoiceStatus;
   currency_rate?: number;
-  invoice_ids?: number[];
 }
 
 const ORDER_FIELDS = [
@@ -94,31 +93,9 @@ async function loadFromOdoo(cfg: Config, yearStart: string, yearEnd: string) {
   const rawOpen = await odoo.searchRead<RawOrder>("sale.order",
     [confirmed, ["invoice_status", "!=", "invoiced"]],
     fields, "date_order desc");
-  // Fully invoiced orders that have at least one invoice dated on/after the year start.
-  const rawInvoiced = await odoo.searchRead<RawOrder>("sale.order",
-    [confirmed, ["invoice_status", "=", "invoiced"], ["order_line.invoice_lines.move_id.invoice_date", ">=", yearStart]],
-    [...fields, "invoice_ids"], "date_order desc");
-
-  // An order counts as invoiced on the date of its last posted customer invoice.
-  const invoiceIds = [...new Set(rawInvoiced.flatMap((o) => o.invoice_ids ?? []))];
-  const invoices = invoiceIds.length
-    ? await odoo.searchRead<{ id: number; name: string; invoice_date: string | false }>("account.move",
-        [["id", "in", invoiceIds], ["state", "=", "posted"], ["move_type", "=", "out_invoice"]],
-        ["name", "invoice_date"])
-    : [];
-  const invById = new Map(invoices.map((i) => [i.id, i]));
-
-  const invoiced = rawInvoiced.flatMap((o) => {
-    const invs = (o.invoice_ids ?? []).map((id) => invById.get(id)).filter((i) => i?.invoice_date);
-    if (!invs.length) return [];
-    const last = invs.map((i) => i!.invoice_date as string).sort().at(-1)!;
-    return [{ ...toOrder(o), invoicedDate: last, invoiceRefs: invs.map((i) => i!.name) }];
-  });
-
   return {
     company: company.name,
     booked: rawBooked.map(toOrder).filter((o) => o.date >= yearStart && o.date < yearEnd),
-    invoiced: invoiced.filter((o) => o.invoicedDate >= yearStart && o.invoicedDate < yearEnd),
     open: rawOpen.map(toOrder),
   };
 }
@@ -127,7 +104,7 @@ const lastGood = new Map<string, { raw: Awaited<ReturnType<typeof loadFromOdoo>>
 
 const cachedOdoo = unstable_cache(
   async (yearStart: string, yearEnd: string) => loadFromOdoo(getConfig(), yearStart, yearEnd),
-  ["odoo-dashboard-v3"],
+  ["odoo-dashboard-v4"],
   { revalidate: 600, tags: ["odoo"] },
 );
 
@@ -163,7 +140,6 @@ export async function getDashboardData(yearStart: string, yearEnd: string): Prom
     yearStart,
     yearEnd,
     orders: raw.booked.map(conv),
-    invoicedOrders: raw.invoiced.map(conv).sort((a, b) => b.invoicedDate!.localeCompare(a.invoicedDate!)),
     openOrders: raw.open.map(conv),
     goals,
     fx,

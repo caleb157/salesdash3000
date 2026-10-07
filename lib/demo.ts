@@ -20,8 +20,7 @@ export function demoData(yearStart: string, yearEnd: string, fx: FxInfo, goals: 
   const today = new Date().toISOString().slice(0, 10);
   const all: Order[] = [];
   let n = 1;
-  // Start a few months early so fully-invoiced orders can cross the year boundary.
-  for (let t = Date.parse(yearStart) - 60 * DAY; t < Math.min(Date.parse(yearEnd), Date.parse(today) + DAY); t += DAY * (2 + Math.floor(r() * 6))) {
+  for (let t = Date.parse(yearStart); t < Math.min(Date.parse(yearEnd), Date.parse(today) + DAY); t += DAY * (2 + Math.floor(r() * 6))) {
     const date = new Date(t).toISOString().slice(0, 10);
     const usd = r() < 0.3;
     const original = usd ? Math.round(2000 + r() * 14000) : Math.round((150000 + r() * 1200000) / 100) * 100;
@@ -34,10 +33,6 @@ export function demoData(yearStart: string, yearEnd: string, fx: FxInfo, goals: 
       date, originalAmount: original, currency: usd ? "USD" : "INR", amount: usd ? Math.round(original * (84 + 4 * r())) : original, // stand-in for Odoo's order-date rate
       invoiceStatus: status,
     };
-    if (status === "invoiced") {
-      order.invoicedDate = new Date(Math.min(t + DAY * (3 + Math.floor(r() * 25)), Date.parse(today))).toISOString().slice(0, 10);
-      order.invoiceRefs = [`INV/${order.invoicedDate.slice(0, 4)}/${String(n).padStart(5, "0")}`];
-    }
     all.push(order);
     n++;
   }
@@ -49,9 +44,6 @@ export function demoData(yearStart: string, yearEnd: string, fx: FxInfo, goals: 
     yearStart,
     yearEnd,
     orders: all.filter((o) => o.date >= yearStart && o.date < yearEnd),
-    invoicedOrders: all
-      .filter((o) => o.invoicedDate && o.invoicedDate >= yearStart && o.invoicedDate < yearEnd)
-      .sort((a, b) => b.invoicedDate!.localeCompare(a.invoicedDate!)),
     openOrders: all.filter((o) => o.invoiceStatus !== "invoiced"),
     goals,
     fx,

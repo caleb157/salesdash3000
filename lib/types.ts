@@ -11,8 +11,6 @@ export interface Order {
   originalAmount: number; // untaxed, order currency
   currency: string; // order currency
   invoiceStatus: InvoiceStatus;
-  invoicedDate?: string; // fully invoiced orders: date of the last posted invoice
-  invoiceRefs?: string[];
 }
 
 export interface Goal {
@@ -36,7 +34,6 @@ export interface DashboardData {
   yearStart: string; // inclusive YYYY-MM-DD
   yearEnd: string; // exclusive YYYY-MM-DD
   orders: Order[]; // booked (confirmed) within the year
-  invoicedOrders: Order[]; // fully invoiced, last invoice dated within the year
   openOrders: Order[]; // confirmed, not fully invoiced (any date)
   goals: Goal[];
   fx: FxInfo;

@@ -8,9 +8,11 @@ with month / quarter / year snapshots (calendar or financial year) and progress 
 | Figure | Source in Odoo |
 |---|---|
 | **Booked** | Confirmed sales orders, dated by confirmation date |
-| **Fully invoiced** | Sales orders whose invoice status is *Fully Invoiced*, dated by their last posted invoice |
-| **Ready to invoice** | Orders booked in the period whose invoice status is *To Invoice* |
+| **Fully invoiced** | Orders booked in the period whose invoice status is now *Fully Invoiced* |
+| **To invoice** | Orders booked in the period that aren't fully invoiced yet |
 | **Open orders** | Every confirmed order not yet fully invoiced, any date |
+
+Fully invoiced + To invoice always equals Booked for the selected period.
 
 Everything is shown **before tax, in INR**. Orders in other currencies (e.g. USD) are converted at
 **Odoo's own exchange rate on the order date** (the order's `currency_rate`). The USD goals are converted at the

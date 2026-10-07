@@ -66,8 +66,9 @@ export default function Dashboard(props: Props) {
 
   const snap = useMemo(() => {
     const booked = data.orders.filter((o) => inRange(o.date, period.start, period.end));
-    const invoiced = data.invoicedOrders.filter((o) => inRange(o.invoicedDate!, period.start, period.end));
-    const toInvoice = booked.filter((o) => o.invoiceStatus === "to invoice");
+    // Both split the booked orders, so fully invoiced + to invoice = booked.
+    const invoiced = booked.filter((o) => o.invoiceStatus === "invoiced");
+    const toInvoice = booked.filter((o) => o.invoiceStatus !== "invoiced");
     const sum = (xs: { amount: number }[]) => xs.reduce((s, x) => s + x.amount, 0);
     return {
       booked, invoiced, toInvoice,
@@ -81,7 +82,7 @@ export default function Dashboard(props: Props) {
   const monthly = useMemo(() => months.map((m) => ({
     ...m,
     booked: data.orders.filter((o) => inRange(o.date, m.start, m.end)).reduce((s, o) => s + o.amount, 0),
-    invoiced: data.invoicedOrders.filter((o) => inRange(o.invoicedDate!, m.start, m.end)).reduce((s, o) => s + o.amount, 0),
+    invoiced: data.orders.filter((o) => o.invoiceStatus === "invoiced" && inRange(o.date, m.start, m.end)).reduce((s, o) => s + o.amount, 0),
   })), [data, months]);
 
   const periodGoals = goals.map((g) => g * period.fraction);
@@ -143,8 +144,8 @@ export default function Dashboard(props: Props) {
 
       <section className="tiles">
         <Tile label="Booked" value={money.full(snap.bookedTotal)} sub={plural(snap.booked.length, "order") + " confirmed"} swatch="booked" />
-        <Tile label="Fully invoiced" value={money.full(snap.invoicedTotal)} sub={plural(snap.invoiced.length, "order") + " completed"} swatch="invoiced" />
-        <Tile label="Ready to invoice" value={money.full(snap.toInvoiceTotal)} sub={`${plural(snap.toInvoice.length, "order")} from this period`} />
+        <Tile label="Fully invoiced" value={money.full(snap.invoicedTotal)} sub={`${plural(snap.invoiced.length, "booked order")} · ${pct(snap.invoicedTotal, snap.bookedTotal)} of booked`} swatch="invoiced" />
+        <Tile label="To invoice" value={money.full(snap.toInvoiceTotal)} sub={`${plural(snap.toInvoice.length, "booked order")} not fully invoiced`} />
         <Tile label="Open orders (all dates)" value={money.full(snap.openTotal)} sub={`${plural(data.openOrders.length, "order")} not fully invoiced`} />
       </section>
 
@@ -184,13 +185,13 @@ export default function Dashboard(props: Props) {
         </div>
         <OrderTable
           rows={filterRows(tab === "booked" ? snap.booked : tab === "invoiced" ? snap.invoiced : tab === "toinvoice" ? snap.toInvoice : data.openOrders, query)}
-          invoiced={tab === "invoiced"} money={money} odooUrl={odooUrl} />
+          money={money} odooUrl={odooUrl} />
         {tab === "open" && <p className="muted small note">All confirmed orders that aren&apos;t fully invoiced yet, regardless of the period selected.</p>}
       </section>
 
       <footer className="muted small foot">
         {fmtYearLabel(basis, year, props.fyStartMonth)} runs {data.yearStart} to {data.yearEnd} (exclusive). Booked = confirmed sales orders by confirmation date.
-        Fully invoiced = orders whose invoicing is complete, dated by their last invoice. All amounts before tax, in INR.
+        Fully invoiced and To invoice split the orders booked in the period, so together they equal Booked. All amounts before tax, in INR.
         {" "}Foreign-currency orders use Odoo&apos;s exchange rate on the order date. USD goals use the live rate:{" "}
         {data.fx.live
           ? <>USD → INR {data.fx.inrPer.USD?.toFixed(2)} ({data.fx.date}, {data.fx.source}).</>
@@ -215,6 +216,7 @@ function inrCompact(n: number) {
   return `${n < 0 ? "-" : ""}₹${String(Number((a / d).toFixed(dp)))}${unit}`;
 }
 
+const pct = (part: number, whole: number) => (whole ? `${Math.round((part / whole) * 100)}%` : "0%");
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 function filterRows<T extends { customer: string; ref: string }>(rows: T[], q: string) {
@@ -373,7 +375,7 @@ function odooLink(odooUrl: string, model: string, id: number) {
   return odooUrl ? `${odooUrl}/web#id=${id}&model=${model}&view_type=form` : undefined;
 }
 
-function OrderTable({ rows, money, odooUrl, invoiced }: { rows: Order[]; money: Money; odooUrl: string; invoiced: boolean }) {
+function OrderTable({ rows, money, odooUrl }: { rows: Order[]; money: Money; odooUrl: string }) {
   if (!rows.length) return <p className="empty muted">No orders here.</p>;
   const total = rows.reduce((s, r) => s + r.amount, 0);
   return (
@@ -382,10 +384,10 @@ function OrderTable({ rows, money, odooUrl, invoiced }: { rows: Order[]; money: 
         <thead>
           <tr>
             <th>Order</th><th>Customer</th>
-            <th className="hide-sm">{invoiced ? "Invoices" : "Customer ref"}</th>
-            <th>{invoiced ? "Invoiced on" : "Booked on"}</th>
+            <th className="hide-sm">Customer ref</th>
+            <th>Booked on</th>
             <th className="hide-sm">Salesperson</th>
-            <th className="hide-sm">{invoiced ? "Booked on" : "Status"}</th>
+            <th className="hide-sm">Status</th>
             <th className="num">Amount</th>
           </tr>
         </thead>
@@ -394,12 +396,11 @@ function OrderTable({ rows, money, odooUrl, invoiced }: { rows: Order[]; money: 
             <tr key={o.id}>
               <td><RefLink href={odooLink(odooUrl, "sale.order", o.id)}>{o.ref}</RefLink></td>
               <td>{o.customer}</td>
-              <td className="hide-sm muted">{invoiced ? o.invoiceRefs?.join(", ") || "—" : o.customerRef || "—"}</td>
-              <td className="nowrap">{invoiced ? o.invoicedDate : o.date}</td>
+              <td className="hide-sm muted">{o.customerRef || "—"}</td>
+              <td className="nowrap">{o.date}</td>
               <td className="hide-sm">{o.salesperson || "—"}</td>
               <td className="hide-sm">
-                {invoiced ? <span className="nowrap">{o.date}</span>
-                  : <span className={`status s-${o.invoiceStatus.replace(" ", "-")}`}>{STATUS_LABEL[o.invoiceStatus]}</span>}
+                <span className={`status s-${o.invoiceStatus.replace(" ", "-")}`}>{STATUS_LABEL[o.invoiceStatus]}</span>
               </td>
               <td className="num">
                 {money.full(o.amount)}
