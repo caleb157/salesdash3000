@@ -76,7 +76,15 @@ The filename becomes the shipment's note. Reading a document spends no API reque
 Scanned or photographed PDFs have no text to read, so type those numbers in.
 A forwarder's house bill or MTD (e.g. Xhipment's `XHPUS…`) can't be tracked at the carrier, so its container number is used instead.
 
-**Setup:** add `JSONCARGO_API_KEY` in Vercel. Without it, every number shows made-up **demo** tracking.
+**Free mode (no key, the default).** Without `JSONCARGO_API_KEY`, nothing is looked up automatically and there's no map. You still get:
+- number checking and shipping-line detection
+- PDF and paste extraction
+- notes, and a "last opened" time per shipment
+- a **Track on <line>** button that opens the shipping line's own free tracking page for that number
+
+For lines whose page can't take the number in the link (Evergreen, HMM, Yang Ming, PIL), the button copies the number so you can paste it in.
+
+**Live mode:** add `JSONCARGO_API_KEY` in Vercel. **Demo mode:** `CONTAINER_DEMO_MODE=true` shows made-up tracking, for trying the live UI.
 For leased boxes (TCNU, TGHU, CAIU, SEGU…), the prefix doesn't say which line is carrying them, so pick the shipping line yourself.
 
 The watch list (numbers + notes) is saved in the browser, so it doesn't sync between devices.
@@ -94,7 +102,7 @@ The watch list (numbers + notes) is saved in the browser, so it doesn't sync bet
    | `ODOO_API_KEY` | your Odoo API key (Odoo → My Profile → Account Security → New API Key) |
    | `DASHBOARD_PASSWORD` | the password you'll type to open the dashboard |
    | `AUTH_SECRET` | any long random string, e.g. output of `openssl rand -hex 32` |
-   | `JSONCARGO_API_KEY` | (optional) container tracker API key from jsoncargo.com |
+   | `JSONCARGO_API_KEY` | (optional) live container tracking from jsoncargo.com; without it the tracker runs in free mode |
 
    Optional (defaults shown): `GOALS=10000000 INR,175000 USD,240000 USD`, `FY_START_MONTH=4`,
    `TIMEZONE=Asia/Kolkata`, `USD_INR_RATE=88` (only used if live rates are unreachable), `DEMO_MODE=true` for fake data.

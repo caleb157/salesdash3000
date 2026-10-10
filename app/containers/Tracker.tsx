@@ -21,6 +21,8 @@ interface Item {
   /** Error from the latest refresh, when an earlier good result is still shown. */
   lastError?: string;
   checkWarning?: string;
+  /** Free mode: when the carrier's tracking page was last opened for this number. */
+  checkedAt?: string;
 }
 
 const STORE = "ctr-watchlist-v1";
@@ -40,7 +42,9 @@ const save = (items: Item[]) => {
   }
 };
 
-export default function Tracker({ demo }: { demo: boolean }) {
+export default function Tracker({ mode }: { mode: "live" | "demo" | "free" }) {
+  const demo = mode === "demo";
+  const free = mode === "free";
   const [items, setItems] = useState<Item[]>([]);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
@@ -63,6 +67,7 @@ export default function Tracker({ demo }: { demo: boolean }) {
   }), []);
 
   const run = useCallback(async (item: Item, refresh = false) => {
+    if (free) return; // nothing to fetch without an API key — the card links to the carrier instead
     setBusy((b) => ({ ...b, [item.id]: true }));
     let result: TrackResult;
     const post = (extra = {}) => fetch("/api/track", {
@@ -82,7 +87,7 @@ export default function Tracker({ demo }: { demo: boolean }) {
     // Keep the last good result on screen if a refresh fails.
     update((prev) => prev.map((x) => (x.id === item.id ? { ...x, result: result.ok || !x.result?.ok ? result : x.result, lastError: result.ok ? undefined : result.error } : x)));
     setBusy((b) => ({ ...b, [item.id]: false }));
-  }, [update]);
+  }, [update, free]);
 
   // Load the saved list and refresh it (the server caches results, so this rarely spends API requests).
   useEffect(() => {
@@ -90,8 +95,8 @@ export default function Tracker({ demo }: { demo: boolean }) {
     setItems(saved);
     setReady(true);
     saved.forEach((it, i) => setTimeout(() => run(it), i * 150));
-    if (!demo) fetch("/api/track/usage").then((r) => r.json()).then(setUsage).catch(() => {});
-  }, [run, demo]);
+    if (mode === "live") fetch("/api/track/usage").then((r) => r.json()).then(setUsage).catch(() => {});
+  }, [run, mode]);
 
   /** Adds new numbers to the list and tracks them; returns how many were new. */
   const addParsed = (parsed: ParsedNumber[], note = "", fromDocument = false) => {
@@ -185,22 +190,27 @@ export default function Tracker({ demo }: { demo: boolean }) {
         <div>
           <h1>Container Tracker</h1>
           <p className="muted small">
-            {demo ? <span className="pill warn">Demo data</span> : "Live carrier + AIS data"}
+            {demo ? <span className="pill warn">Demo data</span> : free ? <span className="pill">Free mode</span> : "Live carrier + AIS data"}
             {usage && !usage.error && usage.left != null && <> · {usage.left.toLocaleString()} of {usage.total?.toLocaleString()} API requests left{usage.plan ? ` (${usage.plan})` : ""}</>}
             {usage?.error && <span className="warn-text"> · {usage.error}</span>}
           </p>
         </div>
         <div className="top-actions">
           <a className="ghost" href="/">Sales</a>
-          {items.length > 0 && <button className="ghost" onClick={refreshAll}>Refresh all</button>}
+          {!free && items.length > 0 && <button className="ghost" onClick={refreshAll}>Refresh all</button>}
           <form method="post" action="/api/logout"><button className="ghost" type="submit">Sign out</button></form>
         </div>
       </header>
 
       {demo && (
         <p className="stale small">
-          No <code>JSONCARGO_API_KEY</code> is set, so every number shows made-up demo tracking. Add the key in your Vercel
-          environment variables to see real locations.
+          Demo mode (<code>CONTAINER_DEMO_MODE=true</code>): every number shows made-up tracking.
+        </p>
+      )}
+      {free && (
+        <p className="info-banner small">
+          Free mode: numbers are checked and matched to their shipping line, and each one opens straight on that line&apos;s own
+          free tracking page. Nothing is looked up automatically, so there&apos;s no map. Add a <code>JSONCARGO_API_KEY</code> later for live locations.
         </p>
       )}
 
@@ -208,7 +218,7 @@ export default function Tracker({ demo }: { demo: boolean }) {
         onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDragging(true); } }}
         onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }}
         onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); setDragging(false); upload(e.dataTransfer.files); } }}>
-        <label htmlFor="numbers"><h3>Track containers or bills of lading</h3></label>
+        <label htmlFor="numbers"><h3>{free ? "Add containers or bills of lading" : "Track containers or bills of lading"}</h3></label>
         <textarea id="numbers" rows={3} value={text} onChange={(e) => setText(e.target.value)}
           placeholder={"Paste numbers or a whole document's text — e.g.\nMSKU1234565\nMEDUAB123456"} spellCheck={false} autoCapitalize="characters" />
         <div className="add-row">
@@ -221,7 +231,7 @@ export default function Tracker({ demo }: { demo: boolean }) {
             <option value="">Detect shipping line</option>
             {Object.entries(CARRIERS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
-          <button type="submit" className="primary" disabled={!text.trim()}>Track</button>
+          <button type="submit" className="primary" disabled={!text.trim()}>{free ? "Add" : "Track"}</button>
         </div>
         <div className="upload-row">
           <input ref={fileInput} id="docs" type="file" accept="application/pdf,.pdf,text/plain,.txt" multiple hidden
@@ -254,19 +264,82 @@ export default function Tracker({ demo }: { demo: boolean }) {
 
       <section className="ship-list">
         {items.map((it) => (
-          <ItemCard key={it.id} item={it} busy={!!busy[it.id]} selected={selected}
-            onSelect={setSelected} onRefresh={() => run(it, true)} onRemove={() => remove(it.id)}
-            onCarrier={(c) => setItemCarrier(it, c)} onNote={(n) => setNote(it.id, n)} />
+          free
+            ? <FreeCard key={it.id} item={it} onRemove={() => remove(it.id)} onCarrier={(c) => setItemCarrier(it, c)}
+                onNote={(n) => setNote(it.id, n)} onChecked={() => update((prev) => prev.map((x) => (x.id === it.id ? { ...x, checkedAt: new Date().toISOString() } : x)))} />
+            : <ItemCard key={it.id} item={it} busy={!!busy[it.id]} selected={selected}
+                onSelect={setSelected} onRefresh={() => run(it, true)} onRemove={() => remove(it.id)}
+                onCarrier={(c) => setItemCarrier(it, c)} onNote={(n) => setNote(it.id, n)} />
         ))}
       </section>
 
       <footer className="muted small foot">
+        {free ? <>
+          Your list and notes are saved in this browser. Leased containers (TEMU, TCNU, TGHU, CAIU, SEGU…) don&apos;t show the shipping
+          line in their prefix. Pick it from the bill of lading or booking, or try a free multi-carrier lookup such as track-trace.com.
+        </> : <>
         Containers don&apos;t carry GPS, so &ldquo;where is it&rdquo; comes from two sources: the shipping line&apos;s own milestones
         (port, terminal, gate-in/out, loaded, discharged) and, while the box is at sea, the live AIS position of the ship it&apos;s on.
         Carrier data is cached for 2 hours and ship positions for 15 minutes to save API requests — Refresh pulls fresh data.
         Your list is saved in this browser.
+        </>}
       </footer>
     </main>
+  );
+}
+
+function FreeCard({ item, onRemove, onCarrier, onNote, onChecked }: {
+  item: Item; onRemove: () => void; onCarrier: (c: Carrier) => void; onNote: (n: string) => void; onChecked: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const c = item.carrier;
+  const needsPaste = c ? CARRIER_NEEDS_PASTE.includes(c) : false;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(item.number);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked — the number is on screen to copy by hand */
+    }
+  };
+  return (
+    <article className="card ship">
+      <div className="ship-head">
+        <div>
+          <div className="ship-num">
+            <span className="pill">{item.kind === "bl" ? "B/L" : "Container"}</span>
+            <strong>{item.number}</strong>
+            {c && <span className="muted small">{CARRIERS[c]}</span>}
+          </div>
+          <input className="ship-note" placeholder="Add a note (customer, PO, where it was last seen…)" defaultValue={item.note} onBlur={(e) => onNote(e.target.value)} />
+        </div>
+        <div className="ship-actions">
+          <button className="ghost small" onClick={copy}>{copied ? "Copied" : "Copy"}</button>
+          <button className="ghost small" onClick={onRemove} aria-label={`Remove ${item.number}`}>✕</button>
+        </div>
+      </div>
+      {item.checkWarning && <p className="warn-text small">{item.checkWarning}</p>}
+      <div className="free-actions">
+        {c ? (
+          <a className="primary" target="_blank" rel="noreferrer" href={carrierTrackingUrl(c, item.number, item.kind)}
+            onClick={() => { onChecked(); if (needsPaste) copy(); }}>
+            Track on {CARRIERS[c].split(" (")[0]} ↗
+          </a>
+        ) : (
+          <span className="muted small">
+            {item.kind === "container" ? `${item.number.slice(0, 4)} is a leasing-company prefix, so the line isn't in the number.` : "Shipping line not recognised from the prefix."}
+          </span>
+        )}
+        <select value={c ?? ""} onChange={(e) => isCarrier(e.target.value) && onCarrier(e.target.value)} aria-label="Shipping line">
+          <option value="" disabled>Pick the shipping line…</option>
+          {Object.entries(CARRIERS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        {!c && <a className="small" href="https://www.track-trace.com/container" target="_blank" rel="noreferrer" onClick={copy}>Not sure? Try track-trace.com ↗</a>}
+      </div>
+      {c && needsPaste && <p className="muted small">{CARRIERS[c]}&apos;s page doesn&apos;t take the number in the link — it&apos;s copied for you, just paste it in.</p>}
+      {item.checkedAt && <p className="muted small">Last opened <span suppressHydrationWarning>{ago(item.checkedAt)}</span></p>}
+    </article>
   );
 }
 

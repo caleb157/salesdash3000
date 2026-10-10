@@ -12,7 +12,14 @@ const containerTtl = () => Math.max(5, Number(process.env.TRACK_CACHE_MINUTES) |
 // AIS positions move continuously; 15 minutes keeps the ship's pin fresh without a request per page view.
 const vesselTtl = () => Math.max(1, Number(process.env.VESSEL_CACHE_MINUTES) || 15) * 60;
 
-export const isDemo = () => process.env.CONTAINER_DEMO_MODE === "true" || !jsonCargoKey();
+/**
+ * live: JSONCargo key set. demo: CONTAINER_DEMO_MODE=true (made-up data, for trying the UI).
+ * free: no key — numbers are checked and linked to the carriers' own free tracking pages, nothing is fetched.
+ */
+export type TrackerMode = "live" | "demo" | "free";
+export const trackerMode = (): TrackerMode =>
+  process.env.CONTAINER_DEMO_MODE === "true" ? "demo" : jsonCargoKey() ? "live" : "free";
+export const isDemo = () => trackerMode() === "demo";
 
 const cachedContainer = (number: string, carrier: Carrier, viaBl?: string) =>
   unstable_cache(() => fetchContainer(number, carrier), ["jc-container", number, carrier, viaBl ?? ""], {
@@ -180,7 +187,7 @@ export interface TrackRequest {
  */
 export function invalidate(req: TrackRequest) {
   const parsed = parseNumber(req.number);
-  if (!parsed || isDemo()) return;
+  if (!parsed || trackerMode() !== "live") return;
   const kind = req.kind ?? parsed.kind;
   revalidateTag(kind === "bl" ? `bl:${parsed.number}` : `ctr:${parsed.number}`, { expire: 0 });
   // A bill of lading's containers are tagged by their own numbers, which we may not know here; tag them via the BL.
@@ -196,6 +203,7 @@ export async function track(req: TrackRequest): Promise<TrackResult> {
   const carrier = req.carrier ?? parsed.carrier;
 
   if (isDemo()) return demoTrack(number, kind, carrier);
+  if (trackerMode() === "free") return { ok: false, error: "Live tracking is off (no JSONCARGO_API_KEY). Use the carrier's tracking page." };
 
   if (!carrier) {
     return {

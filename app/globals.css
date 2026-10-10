@@ -241,7 +241,7 @@ a.ghost { text-decoration: none; display: inline-flex; align-items: center; }
 .ship-num { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .ship-num .pill { margin-left: 0; }
 .ship-num strong { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 16px; letter-spacing: .02em; }
-.ship-note { border: 0; border-bottom: 1px dashed var(--border); background: transparent; padding: 2px 0; margin-top: 4px; font-size: 13px; color: var(--text-2); width: 260px; max-width: 100%; }
+.ship-note { border: 0; border-bottom: 1px dashed var(--border); background: transparent; padding: 2px 0; margin-top: 4px; font-size: 13px; color: var(--text-2); width: 360px; max-width: 100%; }
 .ship-note:focus { outline: none; border-bottom-color: var(--booked); }
 .ship-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .ship-error { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -276,3 +276,8 @@ code { font-size: .92em; }
 .upload-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .add-form.dragging { border-color: var(--booked); box-shadow: inset 0 0 0 2px var(--booked); background: var(--sel); }
 .info { margin: 0; color: var(--text-2); }
+.info-banner { margin: 0; padding: 8px 12px; border-radius: 10px; background: var(--sel); color: var(--text-2); }
+.free-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.free-actions a.primary { text-decoration: none; display: inline-block; }
+.free-actions select { border: 1px solid var(--border); background: var(--bg); border-radius: 10px; padding: 7px 10px; }
+.free-actions a.small { color: var(--booked); }
