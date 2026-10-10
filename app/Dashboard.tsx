@@ -99,6 +99,7 @@ export default function Dashboard(props: Props) {
           </p>
         </div>
         <div className="top-actions">
+          <a className="ghost" href="/containers">Containers</a>
           <form method="post" action="/api/refresh"><button className="ghost" type="submit">Refresh</button></form>
           <form method="post" action="/api/logout"><button className="ghost" type="submit">Sign out</button></form>
         </div>
