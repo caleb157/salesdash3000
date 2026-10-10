@@ -39,6 +39,42 @@ caches each load for 10 minutes, and falls back to the last good load if Odoo is
 Goals are annual (Goal 1 ₹1 crore, Goal 2 $175k, Goal 3 $240k). Quarter and month views show goal ÷ 4 and ÷ 12.
 The financial year runs April → March.
 
+## Container tracker (`/containers`)
+
+Paste container numbers or bills of lading (one or many) and see where each box is now, on a map.
+It's behind the same password as the dashboard, and the **Containers** button in the header opens it.
+
+**Where the location comes from.** Containers don't carry GPS. The tracker combines:
+
+1. **The shipping line's own milestones**: last port/terminal, gate-in/out, loaded, discharged, next port, ETA.
+2. **The live AIS position of the ship the box is on**, while it's at sea: lat/lon, speed, course, and how many minutes old the position is.
+
+In port or on land, the pin sits at the last port or terminal the carrier reported.
+
+**Data source: [JSONCargo](https://jsoncargo.com)**. It's pay-as-you-go with no contract, and one key covers container tracking,
+bill of lading → containers, and live vessel AIS. Plans start at a few euros a month. The page shows how many API requests are left.
+Supported lines: Maersk, MSC, CMA CGM, COSCO, Hapag-Lloyd, ONE, Evergreen, HMM, Yang Ming, ZIM and PIL.
+
+**Free features (no key needed):**
+- ISO 6346 check-digit validation, which catches typos in container numbers
+- Shipping line auto-detected from the container prefix or B/L prefix
+- A link to each carrier's official free tracking page
+- MarineTraffic / VesselFinder links for the ship
+- OpenStreetMap maps
+
+**What it costs in requests:**
+- One request per container per refresh. Results are cached for 2 h (`TRACK_CACHE_MINUTES`).
+- A B/L costs one request, plus one per container on it.
+- The ship's position costs one request per 15 min (`VESSEL_CACHE_MINUTES`).
+- Looking up the ship's IMO costs one request, then it's cached for 30 days.
+- Ports not in the built-in list cost one geocoding request, then they're cached for 30 days.
+- **Refresh** pulls fresh data straight away.
+
+**Setup:** add `JSONCARGO_API_KEY` in Vercel. Without it, every number shows made-up **demo** tracking.
+For leased boxes (TCNU, TGHU, CAIU, SEGU…), the prefix doesn't say which line is carrying them, so pick the shipping line yourself.
+
+The watch list (numbers + notes) is saved in the browser, so it doesn't sync between devices.
+
 ## Deploy to Vercel
 
 1. In Vercel: **Add New → Project → Import** this GitHub repo. Framework preset: Next.js (auto-detected).
@@ -52,6 +88,7 @@ The financial year runs April → March.
    | `ODOO_API_KEY` | your Odoo API key (Odoo → My Profile → Account Security → New API Key) |
    | `DASHBOARD_PASSWORD` | the password you'll type to open the dashboard |
    | `AUTH_SECRET` | any long random string, e.g. output of `openssl rand -hex 32` |
+   | `JSONCARGO_API_KEY` | (optional) container tracker API key from jsoncargo.com |
 
    Optional (defaults shown): `GOALS=10000000 INR,175000 USD,240000 USD`, `FY_START_MONTH=4`,
    `TIMEZONE=Asia/Kolkata`, `USD_INR_RATE=88` (only used if live rates are unreachable), `DEMO_MODE=true` for fake data.
