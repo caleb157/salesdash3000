@@ -70,6 +70,12 @@ Supported lines: Maersk, MSC, CMA CGM, COSCO, Hapag-Lloyd, ONE, Evergreen, HMM, 
 - Ports not in the built-in list cost one geocoding request, then they're cached for 30 days.
 - **Refresh** pulls fresh data straight away.
 
+**Upload documents:** click **Upload PDF**, or drop bills of lading and invoices onto the form, and the container and B/L numbers are pulled out.
+You can also paste a whole document's text. Container numbers must pass the ISO 6346 check digit, and B/L numbers must carry a known carrier prefix or sit next to an "MBL" / "Master B/L" label.
+The filename becomes the shipment's note. Reading a document spends no API requests.
+Scanned or photographed PDFs have no text to read, so type those numbers in.
+A forwarder's house bill or MTD (e.g. Xhipment's `XHPUS…`) can't be tracked at the carrier, so its container number is used instead.
+
 **Setup:** add `JSONCARGO_API_KEY` in Vercel. Without it, every number shows made-up **demo** tracking.
 For leased boxes (TCNU, TGHU, CAIU, SEGU…), the prefix doesn't say which line is carrying them, so pick the shipping line yourself.
 

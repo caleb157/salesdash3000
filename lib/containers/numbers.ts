@@ -113,21 +113,72 @@ export function parseNumber(raw: string): ParsedNumber | null {
   return { number, kind: "bl", carrier: BL_INDEX.get(number.slice(0, 4)) ?? null };
 }
 
-/** Split a pasted blob (one per line, commas, tabs, spaces) into parsed numbers, de-duplicated. */
-export function parseMany(text: string): { parsed: ParsedNumber[]; rejected: string[] } {
+export interface ParseOutcome {
+  parsed: ParsedNumber[];
+  rejected: string[];
+  /** True when the input looked like document text rather than a list of numbers. */
+  fromDocument: boolean;
+  /** Shown when a document only has a forwarder's house bill (which carriers can't track). */
+  hint?: string;
+}
+
+const CONTAINER_IN_TEXT = /(?<![A-Z0-9])([A-Z]{3}[UJZ])[ \t-]?(\d{6})[ \t-]?(\d)(?![0-9])/g;
+const MASTER_BL_LABEL = /(?:MBL|M\.?B\/L|MASTER\s*(?:B\/?L|BILL\s+OF\s+LADING)|OCEAN\s*B\/?L|CARRIER\s*B\/?L)\s*(?:NO\.?|NUMBER|NBR|#)?\s*[:.#-]?\s*([A-Z0-9]{8,20})\b/g;
+const HOUSE_BL = /HOUSE\s*(?:B\/?L|BILL)|\bHBL\b|MULTI-?MODAL\s+TRANSPORT\s+DOCUMENT|\bMTD\s+(?:NO|NUMBER)/;
+
+/**
+ * Pull trackable numbers out of free text such as a bill of lading or invoice: container numbers
+ * with a valid check digit, master B/L numbers next to a label, and B/L numbers with a known carrier prefix.
+ */
+export function extractFromDocument(text: string): ParseOutcome {
+  const up = text.toUpperCase();
+  const seen = new Set<string>();
+  const parsed: ParsedNumber[] = [];
+  const push = (p: ParsedNumber | null) => {
+    if (p && !seen.has(p.number)) { seen.add(p.number); parsed.push(p); }
+  };
+  for (const m of up.matchAll(CONTAINER_IN_TEXT)) {
+    const p = parseNumber(m[1] + m[2] + m[3]);
+    if (p?.checkDigitOk) push(p); // in a document, a failed check digit almost always means "not a container number"
+  }
+  for (const m of up.matchAll(MASTER_BL_LABEL)) {
+    const p = parseNumber(m[1]);
+    if (p && /\d{4}/.test(p.number)) push({ ...p, kind: "bl" });
+  }
+  for (const tok of up.split(/[\s,;:()/]+/)) {
+    const p = parseNumber(tok);
+    // Skip a container number glued to something else (e.g. "CMAU4761912M8890178" from "container/seal").
+    if (p?.kind === "bl" && p.carrier && !looksLikeContainer(p.number.slice(0, 11)) && (p.number.match(/\d/g)?.length ?? 0) >= 5) push(p);
+  }
+  const hasBl = parsed.some((p) => p.kind === "bl");
+  const hint = !hasBl && HOUSE_BL.test(up)
+    ? "This looks like a forwarder's house bill / MTD. Carriers can't track those numbers, so the container numbers on it are used instead."
+    : undefined;
+  return { parsed, rejected: [], fromDocument: true, hint };
+}
+
+/**
+ * Split pasted input into numbers. A plain list (one per line, commas, spaces) is taken as typed;
+ * anything with ordinary words in it is treated as document text and only real numbers are pulled out.
+ */
+export function parseMany(text: string): ParseOutcome {
+  // Rejoin "MSKU 123456 7" style spacing before splitting on whitespace.
+  const joined = text.toUpperCase().replace(/\b([A-Z]{3}[UJZ])[\s-]+(\d{6})[\s-]*(\d)\b/g, "$1$2$3");
+  const tokens = joined.split(/[\s,;]+/).filter(Boolean);
+  if (tokens.length > 40 || tokens.some((t) => /^[A-Z&.'-]{2,}:?$/.test(t))) return extractFromDocument(text);
+
   const seen = new Set<string>();
   const parsed: ParsedNumber[] = [];
   const rejected: string[] = [];
-  // Rejoin "MSKU 123456 7" style spacing before splitting on whitespace.
-  const joined = text.toUpperCase().replace(/\b([A-Z]{3}[UJZ])[\s-]+(\d{6})[\s-]*(\d)\b/g, "$1$2$3");
-  for (const tok of joined.split(/[\s,;]+/).filter(Boolean)) {
+  for (const tok of tokens) {
     const p = parseNumber(tok);
-    if (!p) { rejected.push(tok); continue; }
+    // Every real B/L or booking number has digits in it.
+    if (!p || (p.kind === "bl" && !/\d/.test(p.number))) { rejected.push(tok); continue; }
     if (seen.has(p.number)) continue;
     seen.add(p.number);
     parsed.push(p);
   }
-  return { parsed, rejected };
+  return { parsed, rejected, fromDocument: false };
 }
 
 /** Free official tracking page on the carrier's own website. */

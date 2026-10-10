@@ -1,9 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  CARRIERS, CARRIER_NEEDS_PASTE, carrierTrackingUrl, isCarrier, parseMany, vesselLinks, type Carrier,
+  CARRIERS, CARRIER_NEEDS_PASTE, carrierTrackingUrl, isCarrier, parseMany, vesselLinks, type Carrier, type ParsedNumber,
 } from "@/lib/containers/numbers";
 import type { ContainerTrack, TrackResult } from "@/lib/containers/types";
 import type { MapEntry } from "./TrackMap";
@@ -47,7 +47,12 @@ export default function Tracker({ demo }: { demo: boolean }) {
   const [text, setText] = useState("");
   const [carrier, setCarrier] = useState<Carrier | "">("");
   const [kind, setKind] = useState<"auto" | "container" | "bl">("auto");
-  const [rejected, setRejected] = useState<string[]>([]);
+  const [notices, setNotices] = useState<{ tone: "error" | "info"; text: string }[]>([]);
+  const [uploading, setUploading] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const itemsRef = useRef<Item[]>([]);
+  itemsRef.current = items;
   const [selected, setSelected] = useState<string | null>(null);
   const [usage, setUsage] = useState<{ plan?: string; left?: number; total?: number; error?: string } | null>(null);
 
@@ -88,26 +93,68 @@ export default function Tracker({ demo }: { demo: boolean }) {
     if (!demo) fetch("/api/track/usage").then((r) => r.json()).then(setUsage).catch(() => {});
   }, [run, demo]);
 
-  const add = (e: React.FormEvent) => {
-    e.preventDefault();
-    const { parsed, rejected } = parseMany(text);
-    setRejected(rejected);
-    if (!parsed.length) return;
-    const existing = new Set(items.map((i) => i.number));
+  /** Adds new numbers to the list and tracks them; returns how many were new. */
+  const addParsed = (parsed: ParsedNumber[], note = "", fromDocument = false) => {
+    const existing = new Set(itemsRef.current.map((i) => i.number));
     const fresh: Item[] = parsed.filter((p) => !existing.has(p.number)).map((p) => ({
       id: `${p.number}-${Date.now().toString(36)}`,
       number: p.number,
-      kind: kind === "auto" ? p.kind : kind,
+      // Numbers pulled from a document already know what they are; the dropdowns are for typed lists.
+      kind: kind === "auto" || fromDocument ? p.kind : kind,
       carrier: carrier || p.carrier,
-      note: "",
+      note,
       addedAt: new Date().toISOString(),
       checkWarning: p.kind === "container" && kind !== "bl" && p.checkDigitOk === false
         ? `Check digit doesn't match — the last digit should be ${p.expectedCheckDigit}. Possible typo.` : undefined,
     }));
-    update((prev) => [...fresh, ...prev]);
+    itemsRef.current = [...fresh, ...itemsRef.current];
+    update((prev) => [...fresh, ...prev.filter((x) => !fresh.some((f) => f.number === x.number))]);
     fresh.forEach((it, i) => setTimeout(() => run(it), i * 150));
     if (fresh[0]) setSelected(fresh[0].id + ":0");
-    setText("");
+    return fresh.length;
+  };
+
+  const add = (e: React.FormEvent) => {
+    e.preventDefault();
+    const { parsed, rejected, fromDocument, hint } = parseMany(text);
+    const msgs: typeof notices = [];
+    if (rejected.length) msgs.push({ tone: "error", text: `Skipped (not a valid number): ${rejected.join(", ")}` });
+    if (hint) msgs.push({ tone: "info", text: hint });
+    if (fromDocument && !parsed.length) msgs.push({ tone: "error", text: "No container or bill of lading numbers found in the pasted text." });
+    const added = parsed.length ? addParsed(parsed, "", fromDocument) : 0;
+    if (fromDocument && parsed.length) msgs.push({ tone: "info", text: `Found ${parsed.map((p) => p.number).join(", ")} in the pasted text.` });
+    if (parsed.length > added) msgs.push({ tone: "info", text: `${parsed.length - added} already in your list.` });
+    setNotices(msgs);
+    if (parsed.length) setText("");
+  };
+
+  const upload = async (files: FileList | File[]) => {
+    const list = [...files];
+    if (!list.length) return;
+    setNotices([]);
+    setUploading((n) => n + list.length);
+    await Promise.all(list.map(async (file) => {
+      let msg: (typeof notices)[number];
+      try {
+        const body = new FormData();
+        body.append("file", file);
+        const res = await fetch("/api/track/extract", { method: "POST", body });
+        if (res.status === 401) { window.location.href = "/login"; return; }
+        const r: { ok: boolean; error?: string; found?: ParsedNumber[]; hint?: string | null } = await res.json();
+        if (!r.ok || !r.found) msg = { tone: "error", text: r.error ?? `Couldn't read ${file.name}.` };
+        else if (!r.found.length) msg = { tone: "error", text: `No container or bill of lading numbers found in ${file.name}.` };
+        else {
+          const added = addParsed(r.found, file.name.replace(/\.[a-z0-9]+$/i, ""), true);
+          const names = r.found.map((p) => p.number).join(", ");
+          msg = { tone: "info", text: `${file.name}: found ${names}${added < r.found.length ? ` (${r.found.length - added} already in your list)` : ""}.${r.hint ? " " + r.hint : ""}` };
+        }
+      } catch (e) {
+        msg = { tone: "error", text: `Upload of ${file.name} failed: ${e instanceof Error ? e.message : e}` };
+      }
+      setNotices((prev) => [...prev, msg]);
+    }));
+    setUploading((n) => n - list.length);
+    if (fileInput.current) fileInput.current.value = "";
   };
 
   const remove = (id: string) => {
@@ -157,10 +204,13 @@ export default function Tracker({ demo }: { demo: boolean }) {
         </p>
       )}
 
-      <form className="card add-form" onSubmit={add}>
+      <form className={dragging ? "card add-form dragging" : "card add-form"} onSubmit={add}
+        onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDragging(true); } }}
+        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }}
+        onDrop={(e) => { if (e.dataTransfer.files.length) { e.preventDefault(); setDragging(false); upload(e.dataTransfer.files); } }}>
         <label htmlFor="numbers"><h3>Track containers or bills of lading</h3></label>
         <textarea id="numbers" rows={3} value={text} onChange={(e) => setText(e.target.value)}
-          placeholder={"Paste one or many — e.g.\nMSKU1234565\nMEDUAB123456"} spellCheck={false} autoCapitalize="characters" />
+          placeholder={"Paste numbers or a whole document's text — e.g.\nMSKU1234565\nMEDUAB123456"} spellCheck={false} autoCapitalize="characters" />
         <div className="add-row">
           <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)} aria-label="Number type">
             <option value="auto">Detect type</option>
@@ -173,7 +223,15 @@ export default function Tracker({ demo }: { demo: boolean }) {
           </select>
           <button type="submit" className="primary" disabled={!text.trim()}>Track</button>
         </div>
-        {rejected.length > 0 && <p className="error small">Skipped (not a valid number): {rejected.join(", ")}</p>}
+        <div className="upload-row">
+          <input ref={fileInput} id="docs" type="file" accept="application/pdf,.pdf,text/plain,.txt" multiple hidden
+            onChange={(e) => e.target.files && upload(e.target.files)} />
+          <button type="button" className="ghost small" onClick={() => fileInput.current?.click()} disabled={uploading > 0}>
+            {uploading > 0 ? "Reading…" : "Upload PDF"}
+          </button>
+          <span className="muted small">or drop bills of lading / invoices here — the container numbers are pulled out for you</span>
+        </div>
+        {notices.map((n, i) => <p key={i} className={n.tone === "error" ? "error small" : "info small"}>{n.text}</p>)}
       </form>
 
       {ready && items.length === 0 && (

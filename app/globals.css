@@ -273,3 +273,6 @@ code { font-size: .92em; }
   .ctr-detail dl { grid-template-columns: 1fr; gap: 0; }
   .ctr-detail dd { margin-bottom: 6px; }
 }
+.upload-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.add-form.dragging { border-color: var(--booked); box-shadow: inset 0 0 0 2px var(--booked); background: var(--sel); }
+.info { margin: 0; color: var(--text-2); }
